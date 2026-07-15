@@ -1,0 +1,3 @@
+- **Contain change through isolation, not abstraction.** The "database-agnostic" NFR was debated and *dropped*. The durable principle is a storage layer with a small blast radius — not a costly upfront abstraction to swap databases we'll never swap.
+- **Global feeds + subscriptions join table.** Feeds are stored once in a shared table; a subscriptions join table links users to feeds. Per-user feed duplication was explicitly rejected.
+- **Fail-fast on config.** Missing or malformed env vars must cause immediate startup failure — never silent misbehavior or defaults that mask a broken setup.
