@@ -1,6 +1,7 @@
-- **Contain change through isolation, not abstraction.** The "database-agnostic" NFR was debated and *dropped*. The durable principle is a storage layer with a small blast radius — not a costly upfront abstraction to swap databases we'll never swap.
+- **Contain change through isolation, not abstraction.** The "database-agnostic" NFR was debated and *dropped*. The durable principle is a storage layer with a small blast radius - not a costly upfront abstraction to swap databases we'll never swap.
 - **Global feeds + subscriptions join table.** Feeds are stored once in a shared table; a subscriptions join table links users to feeds. Per-user feed duplication was explicitly rejected.
-- **Fail-fast on config.** Missing or malformed env vars must cause immediate startup failure — never silent misbehavior or defaults that mask a broken setup.
+- **Fail-fast on config.** Missing or malformed env vars must cause immediate startup failure - never silent misbehavior or defaults that mask a broken setup.
+- **Slog attr keys: snake_case.** Matches DB columns and metric labels (both snake_case). However, column names might not necessarily match to slog attr keys. For example feed.title (DB) -> feed_title (slog).
 
 ## Data model
 ```mermaid
@@ -16,11 +17,11 @@ erDiagram
     FEED {
         bigint id PK "GENERATED ALWAYS AS IDENTITY"
         text feed_link UK "NOT NULL; RSS feed URL"
-        text page_link; homepage URL"
+        text page_link "homepage URL"
         text title "NOT NULL"
         timestamptz created_at "NOT NULL DEFAULT now()"
-        timestamptz fetched_at "NULL until first fetch"
-        timestamptz updated_at "feed contents update time, per publisher"
+        timestamptz fetched_at "NULL until first successful fetch AND store"
+        timestamptz updated_at "NULL until first fetch; feed contents update time, per publisher"
     }
 
     ITEM {
@@ -30,9 +31,9 @@ erDiagram
         text title "NOT NULL"
         text description
         text link "NOT NULL"
-        timestamptz published_at "NULL — feeds omit or lie; sort fallback = created_at"
+        timestamptz published_at "NULL - feeds omit or lie; sort fallback = created_at"
         timestamptz created_at "NOT NULL DEFAULT now(); when fetched first"
-        timestamptz updated_at "item update time, per publisher"
+        timestamptz updated_at "NULL - feeds omit or lie; item update time, per publisher"
     }
 
     SUBSCRIPTION {
@@ -60,6 +61,8 @@ To sort items use item.updated_at -> item.published_at -> item.created_at. This 
 
 ### DDL
 ```SQL
+CREATE DATABASE rss;
+
 CREATE TABLE IF NOT EXISTS users (
     id bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     username text UNIQUE NOT NULL,

@@ -1,56 +1,120 @@
 package main
 
 import (
-	"errors"
+	"context"
 	"fmt"
-	"log"
 	"log/slog"
 	"os"
-	"strconv"
+	"sync"
+	"time"
 
-	"github.com/joho/godotenv"
 	"github.com/mmcdole/gofeed"
+	"github.com/paranoidupdate/rssreader/internal/config"
+	"github.com/paranoidupdate/rssreader/internal/core"
+	"github.com/paranoidupdate/rssreader/internal/storage"
 )
 
-type config struct {
-	dbAddress    string
-	pollInterval int
+const maxConcurrency = 5 // TODO: Put into config
+
+func getGUID(feedItem *gofeed.Item) (string, bool) {
+	guid := feedItem.GUID
+	if guid == "" {
+		guid = feedItem.Link
+	}
+
+	if guid == "" {
+		return guid, false
+	}
+	return guid, true
 }
 
-func initConfig() (*config, error) {
-	err := godotenv.Load()
-	if err != nil {
-		return nil, fmt.Errorf("error loading .env file: %w", err)
+func getDescription(feedItem *gofeed.Item) *string {
+	description := feedItem.Description
+	if description == "" {
+		return nil
 	}
-	dbAddress := os.Getenv("DB_ADDRESS")
-	if dbAddress == "" {
-		return nil, errors.New("DB address is not defined")
+	return &description
+}
+
+func parseItems(feed *core.Feed, feedItems []*gofeed.Item) []core.Item {
+	items := make([]core.Item, 0)
+	for _, feedItem := range feedItems {
+		if guid, ok := getGUID(feedItem); ok {
+			item := core.Item{
+				FeedID:      feed.ID,
+				GUID:        guid,
+				Title:       feedItem.Title,
+				Description: getDescription(feedItem),
+				Link:        feedItem.Link,
+				CreatedAt:   time.Time{}, // Can be omitted, keep for clarity
+				PublishedAt: feedItem.PublishedParsed,
+				UpdatedAt:   feedItem.UpdatedParsed, // TODO: Updates are not supported yet
+			}
+			items = append(items, item)
+		} else {
+			slog.Info("Item doesn't have GUID", "feed_link", feed.FeedLink, "item_title", feedItem.Title)
+			// TODO: Add metric for items without GUID
+		}
 	}
-	pollIntervalStr := os.Getenv("POLL_INTERVAL")
-	pollInterval, err := strconv.Atoi(pollIntervalStr) // TODO: use time.Duration
+	return items
+}
+
+func run() error {
+	conf, err := config.InitConfig()
 	if err != nil {
-		return nil, fmt.Errorf("poll interval is not int: %w", err)
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	slog.Info("Config loaded")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	db, err := storage.NewStorage(ctx, conf.DbAddress)
+	if err != nil {
+		return fmt.Errorf("couldn't connect to the database: %w", err)
+	}
+	defer db.Close()
+
+	feeds, err := db.GetFeeds(ctx)
+	if err != nil {
+		return fmt.Errorf("couldn't get feed info: %w", err)
 	}
 
-	return &config{dbAddress, pollInterval}, nil
+	fp := gofeed.NewParser()
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, maxConcurrency) // chan as a semaphore
+
+	for _, feed := range feeds {
+		wg.Go(func() {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			fctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+
+			feedData, err := fp.ParseURLWithContext(feed.FeedLink, fctx)
+			if err != nil {
+				slog.Error("can't parse feed", "feed_link", feed.FeedLink, "error", err)
+			} else {
+				slog.Info("reading feed", "feed_title", feedData.Title)
+				items := parseItems(&feed, feedData.Items)
+				sctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				defer cancel()
+				if storeResult, err := db.StoreFeedItems(sctx, &feed, items); err != nil {
+					slog.Error("feed processing failed", "feed_link", feed.FeedLink, "error", err)
+				} else {
+					slog.Info("items stored", "feed_link", feed.FeedLink, "saved_items", storeResult.Saved, "skipped_items", storeResult.Skipped)
+				}
+			}
+		})
+	}
+	wg.Wait()
+	return nil
 }
 
 func main() {
-	conf, err := initConfig()
-	if err != nil {
-		log.Fatal("Failed to load config: ", err)
-	}
-	fmt.Println("Config", conf)
-	feedLink := "https://openai.com/news/rss.xml"
-	fp := gofeed.NewParser()
-	feed, err := fp.ParseURL(feedLink) // TODO: configure timeout (with context)
-	if err != nil {
-		slog.Error("can't parse feed", "feedLink", feedLink, "error_msg", err)
-	} else {
-		fmt.Printf("Feed type: %v, feed title: %v\n", feed.FeedType, feed.Title)
-		if feed.Len() > 0 {
-			fmt.Println(feed.Items[0].Title)
-			fmt.Println(feed.Items[0].Description)
-		}
+	if err := run(); err != nil {
+		slog.Error("Fetcher failed", "error", err)
+		os.Exit(1)
 	}
 }
