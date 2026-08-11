@@ -1,14 +1,14 @@
 MAIN_FILE := main.go
 
 # .PHONY tells make these targets don't represent actual files
-.PHONY: all build run test lint clean
+.PHONY: all build run-fetcher test lint clean
 
 # Default target
 all: lint
 
 # run: Runs the application directly
-run:
-	go run .
+run-fetcher: lint
+	go run ./cmd/fetcher
 
 # test: Runs all unit tests with race detection
 # test:
