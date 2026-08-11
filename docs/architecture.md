@@ -116,3 +116,7 @@ CREATE TABLE IF NOT EXISTS read_status (
 
 ## Open questions
 - Should HTML in titles, descriptions and contents be escaped? Sanitize them (e.g. with bluemonday Go library) when displaying.
+
+## Important TODOs based on the finished work
+- Use sqlc when SQL becomes more complicated
+- Increase test coverage beyond pure functions
