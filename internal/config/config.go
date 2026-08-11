@@ -5,13 +5,17 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/joho/godotenv"
 )
 
+const defaultMaxFetchConcurrency = 5
+
 type Config struct {
-	DbAddress     string
-	FetchInterval int
+	DbAddress           string
+	FetchInterval       time.Duration
+	MaxFetchConcurrency int
 }
 
 func InitConfig() (*Config, error) {
@@ -24,10 +28,19 @@ func InitConfig() (*Config, error) {
 		return nil, errors.New("DB address is not defined")
 	}
 	fetchIntervalStr := os.Getenv("FETCH_INTERVAL")
-	fetchInterval, err := strconv.Atoi(fetchIntervalStr) // TODO: use time.Duration
+	fetchInterval, err := time.ParseDuration(fetchIntervalStr)
 	if err != nil {
-		return nil, fmt.Errorf("fetch interval is not int: %w", err)
+		return nil, fmt.Errorf("fetch interval is not valid. Valid time units are ns, us (or µs), ms, s, m, h: %w", err)
 	}
 
-	return &Config{dbAddress, fetchInterval}, nil
+	maxFetchConcurrency := defaultMaxFetchConcurrency
+	maxFetchConcurrencyStr, ok := os.LookupEnv("MAX_FETCH_CONCURRENCY")
+	if ok {
+		maxFetchConcurrency, err = strconv.Atoi(maxFetchConcurrencyStr)
+		if err != nil {
+			return nil, fmt.Errorf("max fetch concurrency should be int: %w", err)
+		}
+	}
+
+	return &Config{DbAddress: dbAddress, FetchInterval: fetchInterval, MaxFetchConcurrency: maxFetchConcurrency}, nil
 }

@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/mmcdole/gofeed"
@@ -13,8 +16,6 @@ import (
 	"github.com/paranoidupdate/rssreader/internal/core"
 	"github.com/paranoidupdate/rssreader/internal/storage"
 )
-
-const maxConcurrency = 5 // TODO: Put into config
 
 func getGUID(feedItem *gofeed.Item) (string, bool) {
 	guid := feedItem.GUID
@@ -59,30 +60,14 @@ func parseItems(feed *core.Feed, feedItems []*gofeed.Item) []core.Item {
 	return items
 }
 
-func run() error {
-	conf, err := config.InitConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-	slog.Info("Config loaded")
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	db, err := storage.NewStorage(ctx, conf.DbAddress)
-	if err != nil {
-		return fmt.Errorf("couldn't connect to the database: %w", err)
-	}
-	defer db.Close()
-
+func fetchFeeds(ctx context.Context, conf *config.Config, fp *gofeed.Parser, db *storage.Storage) error {
 	feeds, err := db.GetFeeds(ctx)
 	if err != nil {
 		return fmt.Errorf("couldn't get feed info: %w", err)
 	}
 
-	fp := gofeed.NewParser()
-
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, maxConcurrency) // chan as a semaphore
+	sem := make(chan struct{}, conf.MaxFetchConcurrency) // chan as a semaphore
 
 	for _, feed := range feeds {
 		wg.Go(func() {
@@ -110,6 +95,43 @@ func run() error {
 	}
 	wg.Wait()
 	return nil
+}
+
+func run() error {
+	conf, err := config.InitConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	slog.Info("Config loaded")
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	db, err := storage.NewStorage(ctx, conf.DbAddress)
+	if err != nil {
+		return fmt.Errorf("couldn't connect to the database: %w", err)
+	}
+	defer db.Close()
+
+	fp := gofeed.NewParser()
+
+	tick := time.Tick(conf.FetchInterval)
+	for {
+		select {
+		case <-tick:
+			// Maybe convert to a goroutine with overlap protection in the future
+			err := fetchFeeds(ctx, conf, fp, db)
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					continue // shutdown in progress, ctx.Done() during next iteration
+				}
+				return fmt.Errorf("failed fetch feeds: %w", err)
+			}
+		case <-ctx.Done():
+			slog.Info("Graceful shutdown", "reason", context.Cause(ctx))
+			return nil
+		}
+	}
 }
 
 func main() {
