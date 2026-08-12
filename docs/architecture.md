@@ -114,6 +114,23 @@ CREATE TABLE IF NOT EXISTS read_status (
 );
 ```
 
+## Tech stack
+- Go
+- http/template (maybe Templ in the future)
+- HTMX
+- Pico CSS
+- Chi
+- PostgreSQL
+
+### Infra (aspiring)
+- Kubernetes
+- Terraform
+- Raspberry Pi 5 / AWS (Linode)
+- Prometheus
+- OpenTelemetry
+- GitHub Actions
+- ArgoCD
+
 ## Open questions
 - Should HTML in titles, descriptions and contents be escaped? Sanitize them (e.g. with bluemonday Go library) when displaying.
 
