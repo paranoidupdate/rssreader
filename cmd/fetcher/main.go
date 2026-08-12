@@ -23,6 +23,7 @@ func getGUID(feedItem *gofeed.Item) (string, bool) {
 		guid = feedItem.Link
 	}
 
+	// Can't get GUID
 	if guid == "" {
 		return guid, false
 	}
@@ -46,8 +47,8 @@ func parseItems(feed *core.Feed, feedItems []*gofeed.Item) []core.Item {
 				GUID:        guid,
 				Title:       feedItem.Title,
 				Description: getDescription(feedItem),
-				Link:        feedItem.Link,
-				CreatedAt:   time.Time{}, // Can be omitted, keep for clarity
+				Link:        feedItem.Link, // TODO: Should an item without a link be skipped?
+				CreatedAt:   time.Time{},   // Can be omitted, keep for clarity
 				PublishedAt: feedItem.PublishedParsed,
 				UpdatedAt:   feedItem.UpdatedParsed, // TODO: Updates are not supported yet
 			}

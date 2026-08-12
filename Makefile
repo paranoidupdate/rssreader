@@ -11,8 +11,8 @@ run-fetcher: lint
 	go run ./cmd/fetcher
 
 # test: Runs all unit tests with race detection
-# test:
-#	go test -race -v ./...
+test:
+	go test -race -v ./...
 
 # lint: Runs go vet and staticcheck across all packages
 # TODO: Add golangci-lint
